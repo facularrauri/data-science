@@ -1,0 +1,40 @@
+# Generación de Títulos de Noticias - BBC News Summary
+# Python 3.12 | UTN FRLP - Ciencia de Datos 2026
+
+# Core Data
+pandas>=2.2.0
+numpy>=1.26.0
+pyarrow>=14.0.0
+
+# NLP
+nltk>=3.8.0
+rouge-score>=0.1.2
+
+# Embeddings & GPU
+sentence-transformers>=3.0.0
+# NOTE: Para soporte GPU (CUDA), instalar PyTorch con:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+torch>=2.3.0
+torchvision>=0.18.0
+
+# Vector Store
+chromadb>=0.5.0
+
+# Generative AI (SDK moderno - reemplaza google-generativeai deprecated)
+google-genai>=2.0.0
+
+# Visualization
+matplotlib>=3.9.0
+seaborn>=0.13.0
+wordcloud>=1.9.0
+
+# Utilities
+python-dotenv>=1.0.0
+kaggle>=1.6.0
+tqdm>=4.66.0
+ipykernel>=6.29.0
+jupyter>=1.0.0
+ipywidgets>=8.1.0
+
+# Progress & Display
+rich>=13.7.0
