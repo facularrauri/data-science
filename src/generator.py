@@ -196,7 +196,7 @@ class GeminiGenerator:
 
             result_df[col_name] = titles
 
-        console.print(f"\n[green]✓ Generación completada[/green]")
+        console.print("\n[green]✓ Generación completada[/green]")
         return result_df
 
     # ------------------------------------------------------------------
@@ -262,14 +262,14 @@ class GeminiGenerator:
                     time.sleep(effective_delay)
 
                 elif "blocked" in error_msg.lower() or "safety" in error_msg.lower():
-                    console.print(f"[red]Contenido bloqueado por safety filters.[/red]")
+                    console.print("[red]Contenido bloqueado por safety filters.[/red]")
                     return "[BLOCKED]"
 
                 elif "401" in error_msg or "403" in error_msg or "API_KEY" in error_msg:
                     console.print(
-                        f"[red bold]API Key inválida o sin permisos.[/red bold]\n"
-                        f"Verificá GEMINI_API_KEY en el archivo .env\n"
-                        f"Nueva key en: https://aistudio.google.com/apikey"
+                        "[red bold]API Key inválida o sin permisos.[/red bold]\n"
+                        "Verificá GEMINI_API_KEY en el archivo .env\n"
+                        "Nueva key en: https://aistudio.google.com/apikey"
                     )
                     return "[AUTH_ERROR]"
 
@@ -321,8 +321,208 @@ class GeminiGenerator:
         return self._request_count
 
 
+class HuggingFaceGenerator:
+    """
+    Generador local usando modelos de Hugging Face.
+
+    No usa API externa, por lo que evita cuotas y rate limits. Descarga el modelo
+    la primera vez que se ejecuta y luego lo reutiliza desde la cache local.
+    """
+
+    def __init__(self) -> None:
+        self.cfg = Config.get_instance()
+        self._tokenizer = None
+        self._model = None
+        self._device = None
+        self._prompt_builder = PromptBuilder()
+        self._request_count = 0
+        self._configure_model()
+
+    def _configure_model(self) -> None:
+        """Carga el modelo local de Hugging Face."""
+        try:
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            import torch
+        except ImportError as exc:
+            raise ImportError(
+                "Falta instalar transformers para usar Hugging Face. "
+                "Ejecutá: pip install transformers accelerate"
+            ) from exc
+
+        requested_device = self.cfg.huggingface_device.lower()
+        self._device = torch.device(
+            "cuda" if requested_device == "cuda" and torch.cuda.is_available() else "cpu"
+        )
+
+        console.print(
+            f"[cyan]Modelo Hugging Face local: "
+            f"[bold]{self.cfg.huggingface_model}[/bold] ({self._device})[/cyan]"
+        )
+        self._tokenizer = AutoTokenizer.from_pretrained(self.cfg.huggingface_model)
+        self._model = AutoModelForSeq2SeqLM.from_pretrained(self.cfg.huggingface_model)
+        self._model.to(self._device)
+        self._model.eval()
+
+    @property
+    def tokenizer(self):
+        """Tokenizer local configurado."""
+        if self._tokenizer is None:
+            self._configure_model()
+        return self._tokenizer
+
+    @property
+    def model(self):
+        """Modelo local configurado."""
+        if self._model is None:
+            self._configure_model()
+        return self._model
+
+    def generate_title(
+        self,
+        summary: str,
+        strategy: str = "formal",
+        category: str = "",
+        context_articles: list[str] | None = None,
+        max_retries: int = 1,
+    ) -> str:
+        """Genera un único título para un artículo."""
+        self._prompt_builder.set_strategy(strategy)
+        built = self._prompt_builder.build(
+            summary=summary,
+            category=category,
+            context_articles=context_articles,
+        )
+        return self._call_model(built.prompt, max_retries=max_retries)
+
+    def generate_from_built_prompt(
+        self,
+        built_prompt: BuiltPrompt,
+        max_retries: int = 1,
+    ) -> str:
+        """Genera un título a partir de un BuiltPrompt ya construido."""
+        return self._call_model(built_prompt.prompt, max_retries=max_retries)
+
+    def generate_batch(
+        self,
+        df: pd.DataFrame,
+        strategies: list[str] | None = None,
+        summary_column: str = "input_summary",
+        n_samples: int | None = None,
+        delay_between_requests: float | None = None,
+    ) -> pd.DataFrame:
+        """
+        Genera títulos para múltiples artículos con múltiples estrategias.
+
+        Mantiene la misma interfaz que GeminiGenerator para poder cambiar de
+        proveedor sin reescribir el notebook.
+        """
+        strategies = strategies or list(PromptBuilder.AVAILABLE_STRATEGIES.keys())
+
+        result_df = df.copy()
+        if n_samples:
+            result_df = result_df.head(n_samples)
+
+        console.print(
+            f"\n[cyan]Generando títulos locales para {len(result_df):,} artículos "
+            f"con {len(strategies)} estrategias...[/cyan]"
+        )
+
+        for strategy in strategies:
+            col_name = f"title_{strategy}"
+            console.print(f"\n[bold]Estrategia: {strategy.upper()}[/bold]")
+            titles = []
+
+            for _, row in tqdm(
+                result_df.iterrows(),
+                total=len(result_df),
+                desc=f"  {strategy}",
+            ):
+                summary = row.get(summary_column, "")
+                category = row.get("category", "")
+
+                if not summary:
+                    titles.append("")
+                    continue
+
+                title = self.generate_title(
+                    summary=summary,
+                    strategy=strategy,
+                    category=category,
+                    max_retries=1,
+                )
+                titles.append(title)
+
+                if delay_between_requests:
+                    time.sleep(delay_between_requests)
+
+            result_df[col_name] = titles
+
+        console.print("\n[green]✓ Generación local completada[/green]")
+        return result_df
+
+    def _call_model(self, prompt: str, max_retries: int = 1) -> str:
+        """Ejecuta el modelo local con manejo simple de errores."""
+        import torch
+
+        for attempt in range(max_retries):
+            try:
+                inputs = self.tokenizer(
+                    prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=512,
+                )
+                inputs = {key: value.to(self._device) for key, value in inputs.items()}
+
+                with torch.no_grad():
+                    output_ids = self.model.generate(
+                        **inputs,
+                        max_new_tokens=self.cfg.huggingface_max_tokens,
+                        do_sample=self.cfg.huggingface_temperature > 0,
+                        temperature=self.cfg.huggingface_temperature,
+                    )
+
+                text = self.tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+                self._request_count += 1
+                return GeminiGenerator._clean_output(text)
+            except Exception as exc:
+                console.print(
+                    f"[red]Error Hugging Face (intento {attempt+1}): "
+                    f"{str(exc)[:120]}[/red]"
+                )
+
+        return "[ERROR]"
+
+    @property
+    def request_count(self) -> int:
+        """Número total de generaciones locales realizadas."""
+        return self._request_count
+
+
+def create_generator(provider: str | None = None) -> GeminiGenerator | HuggingFaceGenerator:
+    """
+    Crea el generador configurado.
+
+    Providers:
+      - gemini: API de Google Gemini
+      - huggingface: modelo local vía transformers
+    """
+    cfg = Config.get_instance()
+    selected = (provider or cfg.generator_provider).lower()
+
+    if selected == "gemini":
+        return GeminiGenerator()
+    if selected in {"huggingface", "hf", "local"}:
+        return HuggingFaceGenerator()
+
+    raise ValueError(
+        f"Proveedor generativo desconocido: {selected!r}. "
+        "Usá 'gemini' o 'huggingface'."
+    )
+
+
 if __name__ == "__main__":
-    gen = GeminiGenerator()
+    gen = create_generator()
 
     summary = (
         "The Bank of England has raised interest rates by 0.25 percentage points "

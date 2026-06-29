@@ -13,8 +13,6 @@ chroma_db/
 # Dataset
 data/
 
-# Outputs (opcionales - pueden commitearse)
-# outputs/
 
 # Python
 __pycache__/

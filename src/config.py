@@ -45,8 +45,15 @@ class Config:
         env_path = root / ".env"
         load_dotenv(dotenv_path=env_path, override=True)
 
+        # --- Modelo generativo ---
+        self.generator_provider: str = os.getenv("GENERATOR_PROVIDER", "gemini").lower()
+
         # --- API Keys ---
-        self.gemini_api_key: str = self._require("GEMINI_API_KEY")
+        self.gemini_api_key: str = (
+            self._require("GEMINI_API_KEY")
+            if self.generator_provider == "gemini"
+            else os.getenv("GEMINI_API_KEY", "")
+        )
         self.kaggle_username: str = os.getenv("KAGGLE_USERNAME", "")
         self.kaggle_key: str = os.getenv("KAGGLE_KEY", "")
 
@@ -61,10 +68,16 @@ class Config:
         for path in [self.dataset_path, self.chroma_db_path, self.outputs_path, self.figures_path]:
             path.mkdir(parents=True, exist_ok=True)
 
-        # --- Modelo Gemini ---
+        # Gemini API
         self.gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         self.gemini_max_tokens: int = int(os.getenv("GEMINI_MAX_TOKENS", "200"))
         self.gemini_temperature: float = float(os.getenv("GEMINI_TEMPERATURE", "0.7"))
+
+        # Hugging Face local (sin API ni cuota)
+        self.huggingface_model: str = os.getenv("HUGGINGFACE_MODEL", "google/flan-t5-base")
+        self.huggingface_max_tokens: int = int(os.getenv("HUGGINGFACE_MAX_TOKENS", "64"))
+        self.huggingface_temperature: float = float(os.getenv("HUGGINGFACE_TEMPERATURE", "0.7"))
+        self.huggingface_device: str = os.getenv("HUGGINGFACE_DEVICE", "cpu")
 
         # --- Embeddings ---
         self.embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
@@ -95,7 +108,9 @@ class Config:
     def __repr__(self) -> str:
         return (
             f"Config(\n"
+            f"  generator_provider={self.generator_provider!r},\n"
             f"  gemini_model={self.gemini_model!r},\n"
+            f"  huggingface_model={self.huggingface_model!r},\n"
             f"  embedding_model={self.embedding_model!r},\n"
             f"  embedding_device={self.embedding_device!r},\n"
             f"  dataset_path={self.dataset_path},\n"

@@ -22,6 +22,8 @@ chromadb>=0.5.0
 
 # Generative AI (SDK moderno - reemplaza google-generativeai deprecated)
 google-genai>=2.0.0
+transformers>=4.45.0
+accelerate>=0.34.0
 
 # Visualization
 matplotlib>=3.9.0

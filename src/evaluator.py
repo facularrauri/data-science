@@ -244,8 +244,6 @@ class Evaluator:
         middle = df_sorted.iloc[n_top:-n_bottom]
         random_sample = middle.sample(n=min(n_random, len(middle)), random_state=seed)
 
-        qualitative = pd.concat([top, random_sample, bottom]).drop_duplicates()
-
         # Columnas relevantes para el análisis
         cols = (
             ["category", "original_title"]
@@ -253,8 +251,23 @@ class Evaluator:
             + [f"rougeL_{s}_f1" for s in available_strategies if f"rougeL_{s}_f1" in results_df.columns]
             + ["input_summary"]
         )
-        cols = [c for c in cols if c in qualitative.columns]
-        return qualitative[cols].reset_index(drop=True)
+        cols = [c for c in cols if c in results_df.columns]
+
+        qualitative = pd.concat([top, random_sample, bottom])
+
+        # Evitar drop_duplicates sobre columnas con listas (ej: clean_tokens).
+        dedupe_cols = [
+            c for c in ["category", "filename", "original_title"] if c in qualitative.columns
+        ]
+        if not dedupe_cols:
+            dedupe_cols = [c for c in cols if c in qualitative.columns]
+
+        return (
+            qualitative[cols]
+            .drop_duplicates(subset=[c for c in dedupe_cols if c in cols])
+            .head(n_examples)
+            .reset_index(drop=True)
+        )
 
     # ------------------------------------------------------------------
     # Exportación
